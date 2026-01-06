@@ -7,145 +7,171 @@
 <style>
 body{font-family:sans-serif;background:#fff3e0;margin:0;padding:15px}
 h1{text-align:center;font-size:32px}
-.item{background:#fff;border-radius:12px;padding:10px;margin-bottom:8px;font-size:18px}
+.item,.queue-box,.summary{background:#fff;border-radius:12px;padding:10px;margin-bottom:10px}
 .row{display:flex;justify-content:space-between;align-items:center}
 .btn{font-size:20px;padding:6px 12px;border:none;border-radius:8px}
 .add{background:#ff9800;color:#fff}
 .sub{background:#ccc}
 .done{background:#e53935;color:#fff}
-.queue-box{background:#fff;border-radius:12px;padding:10px;margin-bottom:10px}
-.summary{background:#fff;border-radius:12px;padding:15px;margin-top:15px;font-size:18px}
+.price{font-weight:bold}
+.qr{margin-top:8px;text-align:center}
+hr{border:none;border-top:1px solid #ddd;margin:10px 0}
+.big{font-size:22px}
 </style>
 </head>
 <body>
 
-<h1>🍡 คิวขนมครก</h1>
+<div id="app"></div>
 
-<div id="orderBox"></div>
-<button class="btn add" style="width:100%" onclick="addQueue()">➕ เพิ่มคิว</button>
-
-<div id="queueList"></div>
-
-<div class="summary">
-<b>📊 ยอดขายวันนี้</b><br>
-หอม: <span id="s_hom">0</span> |
-เผือก: <span id="s_pueak">0</span> |
-ข้าวโพด: <span id="s_corn">0</span> |
-รวม: <span id="s_mix">0</span><br><br>
-
-<b>💰 เงินรวม:</b> <span id="total">0</span> บาท<br>
-<b>🏆 ขายดีที่สุด:</b> <span id="best">-</span><br><br>
-
-<button class="btn" onclick="exportCSV()">📤 Excel</button>
-<button class="btn" onclick="shareLine()">📤 LINE</button>
-<button class="btn" onclick="resetDay()">เริ่มวันใหม่</button>
-</div>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
+/* ====== CONFIG ====== */
 const flavors=["หอม","เผือก","ข้าวโพด","รวม"];
-let prices={"หอม":20,"เผือก":20,"ข้าวโพด":20,"รวม":25};
 
+/* ====== STORAGE ====== */
+let prices=JSON.parse(localStorage.getItem("prices"))||{"หอม":20,"เผือก":20,"ข้าวโพด":20,"รวม":25};
 let queue=JSON.parse(localStorage.getItem("queue"))||[];
 let summary=JSON.parse(localStorage.getItem("summary"))||{"หอม":0,"เผือก":0,"ข้าวโพด":0,"รวม":0};
 let qnum=JSON.parse(localStorage.getItem("qnum"))||1;
 
+function save(){
+  localStorage.setItem("prices",JSON.stringify(prices));
+  localStorage.setItem("queue",JSON.stringify(queue));
+  localStorage.setItem("summary",JSON.stringify(summary));
+  localStorage.setItem("qnum",qnum);
+}
+
+/* ====== MODE CHECK ====== */
+const params=new URLSearchParams(location.search);
+const qview=params.get("queue");
+
+/* ====== CUSTOMER MODE ====== */
+if(qview){
+  const q=queue.find(x=>x.num==qview);
+  document.getElementById("app").innerHTML=
+    `<h1>🍡 คิว ${qview}</h1>`+
+    (q?renderCustomer(q):"<p class='big'>ไม่พบคิว</p>");
+  throw "customer";
+}
+
+function renderCustomer(q){
+  let sum=0,html="<div class='summary big'>";
+  for(let f in q.items){
+    let m=q.items[f]*prices[f];
+    sum+=m;
+    html+=`${f} x ${q.items[f]} = ${m} บาท<br>`;
+  }
+  html+=`<hr><b>รวมทั้งหมด ${sum} บาท</b></div>`;
+  return html;
+}
+
+/* ====== SELLER MODE ====== */
 let current={"หอม":0,"เผือก":0,"ข้าวโพด":0,"รวม":0};
 
-function save(){
-localStorage.setItem("queue",JSON.stringify(queue));
-localStorage.setItem("summary",JSON.stringify(summary));
-localStorage.setItem("qnum",qnum);
+function sellerUI(){
+  let html=`<h1>🍡 คิวขนมครก</h1><div id="order">`;
+  flavors.forEach(f=>{
+    html+=`
+    <div class="item row">
+      ${f}
+      <div>
+        <button class="btn sub" onclick="chg('${f}',-1)">−</button>
+        <b>${current[f]}</b>
+        <button class="btn add" onclick="chg('${f}',1)">+</button>
+      </div>
+    </div>`;
+  });
+  html+=`</div>
+  <button class="btn add" style="width:100%" onclick="addQueue()">➕ เพิ่มคิว</button>
+  <div id="list"></div>
+  <div class="summary">
+    <b>💸 ราคา / คิว</b><br>`+
+    flavors.map(f=>`
+    <div class="row">${f}
+      <div>
+        <button class="btn sub" onclick="chgPrice('${f}',-5)">−</button>
+        <span class="price">${prices[f]} บาท</span>
+        <button class="btn add" onclick="chgPrice('${f}',5)">+</button>
+      </div>
+    </div>`).join("")+
+  `<hr>
+    <b>📊 ยอดขาย</b><br>
+    ${flavors.map(f=>`${f}: ${summary[f]} คิว`).join(" | ")}<br><br>
+    <b>💰 เงินรวม:</b> <span id="total"></span> บาท<br>
+    <b>🏆 ขายดีที่สุด:</b> <span id="best"></span><br><br>
+    <button class="btn" onclick="exportCSV()">📤 Excel</button>
+    <button class="btn" onclick="shareLine()">📤 LINE</button>
+    <button class="btn" onclick="resetDay()">เริ่มวันใหม่</button>
+  </div>`;
+  document.getElementById("app").innerHTML=html;
+  render();
 }
 
-function renderOrder(){
-orderBox.innerHTML="";
-flavors.forEach(f=>{
-orderBox.innerHTML+=`
-<div class="item row">
-${f}
-<div>
-<button class="btn sub" onclick="change('${f}',-1)">−</button>
-<b>${current[f]}</b>
-<button class="btn add" onclick="change('${f}',1)">+</button>
-</div>
-</div>`;
-});
-}
-function change(f,n){
-current[f]=Math.max(0,current[f]+n);
-renderOrder();
-}
+function chg(f,n){current[f]=Math.max(0,current[f]+n);sellerUI();}
+function chgPrice(f,n){prices[f]=Math.max(0,prices[f]+n);save();sellerUI();}
 
 function addQueue(){
-let items={};
-let has=false;
-flavors.forEach(f=>{
-if(current[f]>0){items[f]=current[f];has=true;summary[f]+=current[f];}
-});
-if(!has){alert("ยังไม่ได้เลือกออเดอร์");return;}
-queue.push({num:qnum,items});
-qnum++;
-current={"หอม":0,"เผือก":0,"ข้าวโพด":0,"รวม":0};
-save();
-render();
-renderOrder();
+  let items={},has=false;
+  flavors.forEach(f=>{
+    if(current[f]>0){items[f]=current[f];summary[f]+=current[f];has=true;}
+  });
+  if(!has){alert("ยังไม่ได้เลือกออเดอร์");return;}
+  queue.push({num:qnum,items});
+  qnum++; current={"หอม":0,"เผือก":0,"ข้าวโพด":0,"รวม":0};
+  save(); sellerUI();
 }
 
 function render(){
-queueList.innerHTML="";
-queue.forEach((q,i)=>{
-let list="";
-for(let f in q.items){list+=`${f} x ${q.items[f]}<br>`;}
-queueList.innerHTML+=`
-<div class="queue-box">
-<b>คิว ${q.num}</b><br>${list}
-<button class="btn done" onclick="finish(${i})">เสร็จแล้ว</button>
-</div>`;
-});
-calc();
+  let total=0,max=0,best=[];
+  queue.forEach((q,i)=>{
+    let list="";
+    for(let f in q.items) list+=`${f} x ${q.items[f]}<br>`;
+    document.getElementById("list").innerHTML+=`
+      <div class="queue-box">
+        <b>คิว ${q.num}</b><br>${list}
+        <div class="qr" id="qr-${q.num}"></div>
+        <button class="btn done" onclick="finish(${i})">เสร็จแล้ว</button>
+      </div>`;
+    setTimeout(()=>makeQR(q.num),0);
+  });
+  for(let f in summary){
+    total+=summary[f]*prices[f];
+    if(summary[f]>max){max=summary[f];best=[f];}
+    else if(summary[f]==max&&max>0)best.push(f);
+  }
+  document.getElementById("total").innerText=total;
+  document.getElementById("best").innerText=best.join(", ")||"-";
 }
 
-function finish(i){
-queue.splice(i,1);
-save();
-render();
-}
+function finish(i){queue.splice(i,1);save();sellerUI();}
 
-function calc(){
-let total=0,max=0,best=[];
-for(let f in summary){
-document.getElementById("s_"+(f=="เผือก"?"pueak":f=="ข้าวโพด"?"corn":f=="รวม"?"mix":"hom")).innerText=summary[f];
-total+=summary[f]*prices[f];
-if(summary[f]>max){max=summary[f];best=[f];}
-else if(summary[f]==max&&max>0)best.push(f);
-}
-document.getElementById("total").innerText=total;
-document.getElementById("best").innerText=best.join(", ")||"-";
+function makeQR(num){
+  const url=location.origin+location.pathname+"?queue="+num;
+  new QRCode(document.getElementById("qr-"+num),{text:url,width:120,height:120});
 }
 
 function exportCSV(){
-let csv="ไส้,จำนวน,ราคา,เงิน\n";
-for(let f in summary){csv+=`${f},${summary[f]},${prices[f]},${summary[f]*prices[f]}\n`;}
-let a=document.createElement("a");
-a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
-a.download="kanomkrok_today.csv";a.click();
+  let csv="ไส้,จำนวน,ราคา,เงิน\n";
+  for(let f in summary) csv+=`${f},${summary[f]},${prices[f]},${summary[f]*prices[f]}\n`;
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  a.download="kanomkrok_today.csv"; a.click();
 }
 
 function shareLine(){
-let t="สรุปยอดขนมครกวันนี้\n";
-for(let f in summary){t+=`${f}: ${summary[f]} คิว\n`;}
-t+=`รวม ${total.innerText} บาท`;
-navigator.share?navigator.share({text:t}):alert(t);
+  let t="สรุปยอดขนมครกวันนี้\n";
+  for(let f in summary) t+=`${f}: ${summary[f]} คิว\n`;
+  t+=`รวม ${document.getElementById("total").innerText} บาท`;
+  navigator.share?navigator.share({text:t}):alert(t);
 }
 
 function resetDay(){
-if(!confirm("เริ่มวันใหม่?"))return;
-queue=[];summary={"หอม":0,"เผือก":0,"ข้าวโพด":0,"รวม":0};qnum=1;
-save();render();
+  if(!confirm("เริ่มวันใหม่?"))return;
+  queue=[]; summary={"หอม":0,"เผือก":0,"ข้าวโพด":0,"รวม":0}; qnum=1;
+  save(); sellerUI();
 }
 
-renderOrder();render();
+sellerUI();
 </script>
-
 </body>
 </html>
